@@ -40,6 +40,14 @@ contest_venv/
 *_results.json
 *.log
 
+# Datasets and local generated images
+floorset_lite/
+data/
+C_20260224.pdf
+inteltest_layouts/*.png
+inteltest_layouts/*.gif
+
 # OS
 .DS_Store
 Thumbs.db
+
