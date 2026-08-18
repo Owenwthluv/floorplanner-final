@@ -538,7 +538,7 @@ def _solve_clarabel(n, positions, is_preplaced, constraints, ar_max, verbose, to
     # a linear program: one auxiliary variable per edge per axis, bounded below
     # by both signs of the difference, and minimised.  Centre is x + w/2, so
     # the shaping variables enter it too -- widening a block drags its centre.
-    WIRE = float(_os.environ.get("SOCP_WIRE", "0.0"))
+    WIRE = float(_os.environ.get("SOCP_WIRE", "0.03"))
     eb, ep = [], []
     if WIRE > 0.0:
         if b2b is not None and len(b2b):
@@ -618,12 +618,24 @@ def _solve_clarabel(n, positions, is_preplaced, constraints, ar_max, verbose, to
                     abut_h.add((a, b))
                 if abs(P[a, 1] + P[a, 3] - P[b, 1]) < 1e-4:
                     abut_v.add((a, b))
-    for a, b in sorted(abut_h):
-        eq([(IX + a, 1.0), (IW + a, 1.0), (IX + b, -1.0)], 0.0)
-    for a, b in sorted(abut_v):
-        eq([(IY + a, 1.0), (IH + a, 1.0), (IY + b, -1.0)], 0.0)
+    # BOUNDARY AND CLUSTER ARE SOFT CONSTRAINTS IN THE RULES, HARD HERE.
+    # That is safe when the input is already a legal packing -- the equalities
+    # then agree with the constraint graph read off it.  It is NOT safe when
+    # the input still overlaps: the graph says one block is right of another
+    # while the boundary says it sits at x=0, the two cannot both hold, and the
+    # solver returns PrimalInfeasible.  That is exactly why feeding stage 2
+    # straight in gave 7 feasible cases out of 100.
+    # SOCP_BND / SOCP_CLU = "off" drops them, so the model stays feasible and
+    # the violations are paid for in the score instead of in feasibility.
+    _clu_on = _os.environ.get("SOCP_CLU", "hard") != "off"
+    _bnd_on = _os.environ.get("SOCP_BND", "hard") != "off"
+    if _clu_on:
+        for a, b in sorted(abut_h):
+            eq([(IX + a, 1.0), (IW + a, 1.0), (IX + b, -1.0)], 0.0)
+        for a, b in sorted(abut_v):
+            eq([(IY + a, 1.0), (IH + a, 1.0), (IY + b, -1.0)], 0.0)
     for i in range(n):
-        if prep[i] or not bnd[i]:
+        if prep[i] or not bnd[i] or not _bnd_on:
             continue
         if bnd[i] & 1:
             eq([(IX + i, 1.0)], 0.0)

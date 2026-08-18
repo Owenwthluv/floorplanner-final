@@ -1396,8 +1396,19 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                     if free <= w_min - EPS or free >= w0 - EPS:
                         continue                # no gain, or too thin for AR
                     x2 = 0.0 if at_left else W - free
-                    h2 = area[i] / free
-                    top = min(_free_top(x2, x2 + free, y0), y0 + h2)
+                    h2 = area[i] / free           # area-constant, so h2 > h0
+                    # TAKE THE WHOLE HEIGHT OR NONE OF IT.
+                    # An earlier version capped the height at whatever was
+                    # free above (top = min(free_top, y0 + h2)) and kept the
+                    # narrowed width, which quietly DESTROYS area: a block
+                    # went 192 -> 144, blowing the 1% area tolerance, and the
+                    # tolerance is a hard constraint -- one such block makes
+                    # the whole case infeasible at cost 10.  Validation never
+                    # caught it; a fresh suite drawn from the training pool
+                    # did, on its first run.
+                    if _free_top(x2, x2 + free, y0) < y0 + h2 - EPS:
+                        continue                  # the taller shape will not fit
+                    top = y0 + h2
                     if top - y0 > max(base - y0, best[0] - y0 if best else 0) + EPS:
                         best = (top, free, x2)
                 # Growing a block that already clears the obstacle was tried

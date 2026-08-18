@@ -43,6 +43,18 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
+# RUN FROM ANYWHERE.
+# The sibling modules below are imported by bare name, which only resolves when
+# the interpreter's working directory happens to be this one.  The grader loads
+# a submission with spec_from_file_location on an absolute path and need not cd
+# here first -- and then every one of these imports raises and the submission
+# scores nothing.  Put our own directory on the path first so the file is
+# self-locating.
+import sys as _sys
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+
 from iccad2026_evaluate import FloorplanOptimizer
 from model import FloorplanGNN
 from ml_utils import build_pyg_graph
@@ -51,7 +63,16 @@ from stage3_legalizer import stage3_legalizer
 
 # STAGE 1 checkpoint.  Kept in its own file so it can be swapped
 # without touching the code; 13 input channels (see build_pyg_graph).
+# Resolved against THIS FILE, not the working directory.  A relative name
+# silently misses when the grader runs from elsewhere, and the miss is not an
+# error: the optimizer prints a warning and carries on with a RANDOMLY
+# INITIALISED network, which is how the server run quietly scored a pipeline
+# with no trained stage 1 in it at all.
 WEIGHTS = _os.environ.get("GNN_WEIGHTS", "floorplan_gnn_ar9_final.pth")
+if not _os.path.isabs(WEIGHTS):
+    _cand = _os.path.join(_HERE, WEIGHTS)
+    if _os.path.exists(_cand):
+        WEIGHTS = _cand
 
 
 def _score(P, n, cons, e_b2b, e_p2b, pins):
@@ -305,11 +326,15 @@ class MyOptimizer(FloorplanOptimizer):
         _r = [positions[i, 0] + positions[i, 2]
               for i in range(block_count) if _cd[i] & 2]
         w_hint = float(np.median(_r) - np.median(_l)) if (_l and _r) else None
+        # Diagnostic seams.  One slot each, overwritten per case, so they
+        # cost a single array copy and cannot grow.  They are what let the
+        # stages be compared against ground truth without re-running anything.
+        globals()["LAST_STAGE1"] = positions[:block_count].copy()
         stage2_electrostatic(block_count, positions, is_preplaced_arr,
                          area_targets=area_targets.cpu().numpy(), constraints=cons_np,
                          b2b_edges=b2b_connectivity.cpu().numpy(),
                          cap_start=float(_os.environ.get("LD_CAP_START", "6.0")),
-                         cap_end=float(_os.environ.get("LD_CAP_END", "0.5")),
+                         cap_end=float(_os.environ.get("LD_CAP_END", "1.0")),
                          anneal_frac=float(_os.environ.get("LD_ANNEAL", "0.6")),
                          rounds=int(_os.environ.get("LD_ROUNDS", "900")),
                          lr=float(_os.environ.get("LD_LR", "1.0")),
@@ -319,7 +344,7 @@ class MyOptimizer(FloorplanOptimizer):
                          w_grav=float(_os.environ.get("LD_GRAV", "0.0")),
                          p2b_edges=p2b_connectivity.cpu().numpy(),
                          pins_pos=pins_pos.cpu().numpy(),
-                         w_pin=float(_os.environ.get("LD_PIN", "0.0")),
+                         w_pin=float(_os.environ.get("LD_PIN", "1.5")),
                          mass_exp=float(_os.environ.get("LD_MASS", "0.0")))
         # =================================================================
         # STAGES 3-5, SWEPT OVER FRAME WIDTHS
