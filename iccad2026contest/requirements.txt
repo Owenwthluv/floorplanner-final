@@ -1,9 +1,18 @@
 # ICCAD 2026 FloorSet Challenge - Requirements
 # Install: pip install -r requirements.txt
 
+# --- contest framework ---
 torch>=2.0.0
-numpy>=1.24.0
+numpy>=1.23.0
 shapely>=2.0.0
 matplotlib>=3.7.0
 tqdm>=4.60.0
 requests>=2.28.0
+
+# --- this floorplanner ---
+# clarabel is the convex solver behind STAGE 4.  Apache-2.0, ships as a
+# self-contained binary wheel: no licence file, no network at solve time.
+# Without it STAGE 4 disables itself and the result falls back to the
+# legalizer's own output, which costs roughly 0.13 of Total Score.
+clarabel>=0.9
+scipy>=1.10

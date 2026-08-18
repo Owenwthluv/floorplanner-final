@@ -321,7 +321,8 @@ def compute_cost(
     
     quality_factor = 1 + ALPHA * (max(0, hpwl_gap) + max(0, area_gap))
     violation_factor = math.exp(BETA * violations_relative)
-    runtime_adjustment = max(0.7, math.pow(max(0.01, runtime_factor), GAMMA))
+    runtime_adjustment = 1.0 if runtime_factor == 1.0 else \
+        max(0.7, math.pow(max(0.01, runtime_factor), GAMMA))
     
     return quality_factor * violation_factor * runtime_adjustment
 
@@ -900,12 +901,20 @@ class ContestEvaluator:
                     runtime_seconds=0, cost=M_PENALTY, error=str(e)
                 ))
         
-        # Recompute with median runtime
+        # Recompute with median runtime.
+        # The median here is taken over THIS submission's own 100 runtimes,
+        # which is only a stand-in: the official score compares each case
+        # against the median across all contestants.  Set EVAL_NO_RUNTIME=1 to
+        # drop the runtime term entirely (factor = 1) and score pure solution
+        # quality; the default keeps the published formula untouched.
         if runtimes:
+            import os as _os
+            no_rt = _os.environ.get("EVAL_NO_RUNTIME") == "1"
             median_rt = sorted(runtimes)[len(runtimes)//2]
             for r in results:
                 if r.error is None:
-                    rt_factor = r.runtime_seconds / max(median_rt, 0.01)
+                    rt_factor = 1.0 if no_rt else \
+                        r.runtime_seconds / max(median_rt, 0.01)
                     r.cost = compute_cost(r.hpwl_gap, r.area_gap, r.violations_relative,
                                          rt_factor, r.is_feasible)
         
