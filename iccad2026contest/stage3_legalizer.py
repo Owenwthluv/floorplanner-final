@@ -1234,7 +1234,17 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
 
     # Everything already on the floor becomes a real wirelength anchor: the
     # bottom row, both side towers, and any non-boundary preplaced obstacle.
-    for i in list(row) + Ls + Rs:
+    # THE TOP ROW COUNTS TOO.
+    # This list is what the interior fill treats as "already on the floor": its
+    # wirelength term and its cluster term both read placed_at, and both were
+    # blind to every block on the top edge because trow was left out.  A
+    # cluster with one member up there could not be pulled towards it -- the
+    # scorer did not know the member existed -- and those clusters carry 54% of
+    # the surviving grouping violations off 26% of the clusters.
+    _anchors = list(row) + Ls + Rs + (list(trow)
+                                      if _os.environ.get("PACK_TOPANCH", "1") == "1"
+                                      else [])
+    for i in _anchors:
         placed_at[i] = (float(P[i, 0] + P[i, 2] / 2), float(P[i, 1] + P[i, 3] / 2))
 
     # ---- STRETCH THE TOWERS UP TO THE LID ----
@@ -1558,12 +1568,30 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                       if (b[0], b[2]) not in _lid] + [0.0])]
         SQA = np.sqrt(A)
 
+        TOPCL = _os.environ.get("PACK_TOPCL", "1") == "1"
+        TOPCL_AREA = float(_os.environ.get("PACK_TOPCL_AREA", "0.0"))
+        top_clusters = {clust[i] for i in range(n)
+                        if clust[i] > 0 and (code[i]["T"]
+                                             or (is_preplaced[i]
+                                                 and H_ceil is not None
+                                                 and P[i, 1] + P[i, 3] >= H_ceil - EPS))}
+
         def mk_score(i):
             peers = [j for j in range(n) if clust[j] == clust[i] and j != i] \
                 if clust[i] > 0 else []
 
+            # A cluster whose other half is pinned to the CEILING should not be
+            # charged for climbing.  s_area prices the frame growth a landing
+            # causes, which is the right price for a free block and the wrong
+            # one here: the band under the top row is dead space already -- 24%
+            # of all dead space in the layout -- so a member that climbs into
+            # it to reach its peer costs nothing and fills something.
+            _up = TOPCL and clust[i] > 0 and clust[i] in top_clusters
+
             def sc(x, y, w2, h2, rect_area, rw_=0.0, rh_=0.0):
                 s_area = (W * max(0.0, y + h2 - H_cur[0])) / A
+                if _up:
+                    s_area *= TOPCL_AREA
                 wl, k = hpwl_of(i, x + w2 / 2, y + h2 / 2)
                 s = s_area + (WIREW * wl / HPWL_REF if k else 0.0)
                 lam = LAM if k else LAM_FREE   # no placed neighbour -> fit decides
