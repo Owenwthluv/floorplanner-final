@@ -10,9 +10,18 @@ tqdm>=4.60.0
 requests>=2.28.0
 
 # --- this floorplanner ---
+# torch_geometric is a HARD dependency: ml_utils imports it at module level and
+# my_optimizer imports ml_utils at module level, so without it the submission
+# does not even load and every case scores infeasible.
+torch_geometric>=2.4
+
 # clarabel is the convex solver behind STAGE 4.  Apache-2.0, ships as a
 # self-contained binary wheel: no licence file, no network at solve time.
-# Without it STAGE 4 disables itself and the result falls back to the
-# legalizer's own output, which costs roughly 0.13 of Total Score.
+# Without it STAGE 4 disables itself -- the result stays feasible but costs
+# roughly 0.13 of Total Score.
 clarabel>=0.9
 scipy>=1.10
+
+# mosek is deliberately NOT listed.  stage4 can use it (SOCP_BACKEND=mosek) but
+# it needs a licence file that a grading machine will not have, and the import
+# is guarded, so its absence costs nothing.
