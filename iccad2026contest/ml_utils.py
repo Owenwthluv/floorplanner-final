@@ -3,10 +3,17 @@ from torch_geometric.data import Data
 
 import numpy as np
 
-def build_pyg_graph(area_targets, b2b_conn, constraints, p2b_conn=None, pins_pos=None, sol=None):
+def build_pyg_graph(area_targets, b2b_conn, constraints, p2b_conn=None, pins_pos=None, sol=None,
+                    target_pos=None):
     """
     Converts a single FloorSet batch (batch_size=1) into a PyTorch Geometric Data object.
     Input shapes assume a leading batch dimension of size 1.
+
+    target_pos (optional): [n, 4] (x, y, w, h) mandated values, -1 where not
+    applicable (preplaced blocks carry all four, fixed-shape blocks carry w/h
+    only). When provided, these are appended as 4 extra node features
+    (in_channels 9 -> 13) so the GNN can plan around immovable blocks.
+    When None, the original 9-feature graph is built (backward compatible).
     """
     areas = area_targets[0]
     b2b = b2b_conn[0]
@@ -60,6 +67,12 @@ def build_pyg_graph(area_targets, b2b_conn, constraints, p2b_conn=None, pins_pos
             area, c_fixed, c_preplaced, c_mib, c_cluster, c_bound,
             float(gravity_x[i]), float(gravity_y[i]), float(has_pin_conn[i])
         ]
+        if target_pos is not None:
+            if i < len(target_pos):
+                features.extend([float(target_pos[i, 0]), float(target_pos[i, 1]),
+                                 float(target_pos[i, 2]), float(target_pos[i, 3])])
+            else:  # padded rows beyond the provided target tensor
+                features.extend([-1.0, -1.0, -1.0, -1.0])
         node_features.append(features)
         
     x = torch.tensor(node_features, dtype=torch.float32)
