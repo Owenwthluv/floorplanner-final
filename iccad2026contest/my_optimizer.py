@@ -300,6 +300,14 @@ class MyOptimizer(FloorplanOptimizer):
             positions[i] = [x, y, w, h]
 
         # MIB uniformity (same as base)
+        # FIX: forcing a hard MIB member's exact (w,h) onto every soft
+        # sibling regardless of the sibling's own target area guarantees an
+        # area-tolerance violation (infeasible) once they differ by >1%.
+        # Held-out check on floorset_lite/ (disjoint from the 100 visible
+        # cases) found this broke 5/5 sampled cases; invisible on the
+        # visible set. Only reuse (fw, fh) when it's within tolerance of the
+        # sibling's own area; otherwise use the hard member's aspect ratio
+        # applied to the sibling's own area.
         mib_const = constraints[:, 2].cpu().numpy(); mg = int(mib_const.max())
         if mg > 0:
             for g in range(1, mg + 1):
@@ -312,10 +320,14 @@ class MyOptimizer(FloorplanOptimizer):
                     avg_ar = max(0.5, min(2.0, float(np.mean(positions[gi, 2] / positions[gi, 3]))))
                     for idx in gi:
                         if not (int(constraints[idx, 0]) > 0 or int(constraints[idx, 1]) > 0):
-                            if fw is not None:
+                            a = float(area_targets[idx]) if area_targets[idx] > 0 else 1.0
+                            if fw is not None and abs(float(fw) * float(fh) - a) / max(a, 1e-6) <= 0.01:
                                 positions[idx, 2], positions[idx, 3] = fw, fh
+                            elif fw is not None:
+                                ar = max(0.5, min(2.0, float(fw) / float(fh)))
+                                positions[idx, 2] = math.sqrt(a * ar)
+                                positions[idx, 3] = a / positions[idx, 2]
                             else:
-                                a = float(area_targets[idx]) if area_targets[idx] > 0 else 1.0
                                 positions[idx, 2] = math.sqrt(a * avg_ar)
                                 positions[idx, 3] = a / positions[idx, 2]
 
@@ -336,7 +348,15 @@ class MyOptimizer(FloorplanOptimizer):
                          cap_start=float(_os.environ.get("LD_CAP_START", "6.0")),
                          cap_end=float(_os.environ.get("LD_CAP_END", "1.0")),
                          anneal_frac=float(_os.environ.get("LD_ANNEAL", "0.6")),
-                         rounds=int(_os.environ.get("LD_ROUNDS", "900")),
+                         # 900 -> 450: profiling showed this stage as the
+                         # single biggest cost in solve() (case 99: 1.26s of
+                         # 3.47s), and 900 rounds is more than stage3 needs
+                         # from it (a density-ordered starting layout, not a
+                         # converged one). Swept 900/450/350/225 on the full
+                         # suite, runtime-adjusted: 450 is the sweet spot --
+                         # lower saves more runtime but quality creeps back
+                         # up on the heavily-weighted large cases.
+                         rounds=int(_os.environ.get("LD_ROUNDS", "450")),
                          lr=float(_os.environ.get("LD_LR", "1.0")),
                          w_battr=float(_os.environ.get("LD_BATTR", "3.0")),
                          w_cattr=float(_os.environ.get("LD_CATTR", "2.0")),
@@ -366,8 +386,15 @@ class MyOptimizer(FloorplanOptimizer):
         # Its HPWL is the wirelength the TOPOLOGY is worth, separate from what
         # packing later spends -- the two are worth telling apart.
         globals()["LAST_STAGE2"] = base.copy()
+        # WIDTH SWEEP DEFAULT: single scale, not five.
+        # Each scale re-runs the full stage3+refine+SOCP pipeline, and
+        # PACK_WDEDUP only collapses scales that land on the identical
+        # achievable frame -- most cases still pay for all 5. Runtime-
+        # adjusted against real per-case median runtime, one scale beats
+        # both 5-scale and a 2-scale compromise despite worse raw quality
+        # alone. Override with PACK_WSWEEP to restore the sweep.
         scales = [float(v) for v in
-                  _os.environ.get("PACK_WSWEEP", "1.0,0.85,0.95,1.1,1.2").split(",")]
+                  _os.environ.get("PACK_WSWEEP", "1.0").split(",")]
         # CENTRE THE SWEEP ON WHAT THE BOTTOM ROW CAN ACTUALLY REACH.
         #
         # The scales above multiply sqrt(A/util * ar), a formula the bottom row
