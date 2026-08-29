@@ -221,6 +221,24 @@ class MaxRects:
         return best[2], best[1], best[3]
 
 
+# ---- PACKING TRACE (PACK_TRACE=1) --------------------------------------
+# Stage 2 lands within 10% of ground truth on wirelength; the final layout is
+# 19% off.  The nine points in between are spent here, and a score that is
+# merely "reasonable" cannot show which of its four terms spends them.
+#
+# So record, for every interior landing, the score the chosen spot earned AND
+# the score the GROUND TRUTH spot would have earned, term by term.  The two
+# readings answer different questions:
+#   * GT scores WORSE  -> the equation genuinely prefers where we put it, and
+#                         the weights are what to change.
+#   * GT scores BETTER -> the equation wanted GT and could not have it, so the
+#                         loss is in availability -- phase order, or the free
+#                         rectangles left by earlier blocks -- not the weights.
+# TRACE is a list of dicts; GT_POS is set by the caller before the call.
+TRACE = []
+GT_POS = None
+
+
 def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                 b2b=None, p2b=None, pins=None, w_hint=None, w_scale=1.0):
     if util is None:
@@ -1241,6 +1259,17 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
     # cluster with one member up there could not be pulled towards it -- the
     # scorer did not know the member existed -- and those clusters carry 54% of
     # the surviving grouping violations off 26% of the clusters.
+    if _os.environ.get("PACK_TRACE", "0") == "1" and GT_POS is not None:
+        for _ph, _seq in (("bottom", row), ("left", Ls), ("right", Rs), ("top", trow)):
+            for _i in _seq:
+                if _i < len(GT_POS):
+                    _g = [float(v) for v in GT_POS[_i][:4]]
+                    TRACE.append(dict(blk=int(_i), phase=_ph,
+                                      x=float(P[_i, 0]), y=float(P[_i, 1]),
+                                      w=float(P[_i, 2]), h=float(P[_i, 3]),
+                                      gx=_g[0], gy=_g[1], gw=_g[2], gh=_g[3],
+                                      score_here=None, score_gt=None))
+
     _anchors = list(row) + Ls + Rs + (list(trow)
                                       if _os.environ.get("PACK_TOPANCH", "1") == "1"
                                       else [])
@@ -1568,6 +1597,8 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                       if (b[0], b[2]) not in _lid] + [0.0])]
         SQA = np.sqrt(A)
 
+        TRACING = _os.environ.get("PACK_TRACE", "0") == "1"
+        _last = [0.0, 0.0, 0.0, 0.0]
         TOPCL = _os.environ.get("PACK_TOPCL", "1") == "1"
         TOPCL_AREA = float(_os.environ.get("PACK_TOPCL_AREA", "0.0"))
         top_clusters = {clust[i] for i in range(n)
@@ -1600,6 +1631,7 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                         s += lam * min(rw_ - w2, rh_ - h2) / SQA
                     else:
                         s += lam * (rect_area - w2 * h2) / A
+                g_term = 0.0
                 if GRP and peers:
                     gap = None
                     for j in peers:
@@ -1613,8 +1645,13 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
                         if gap is None or d < gap:
                             gap = d
                     if gap:
-                        s += GRP * gap / SQA
+                        g_term = GRP * gap / SQA
+                        s += g_term
 
+                if TRACING:
+                    _last[:] = [s_area, (WIREW * wl / HPWL_REF if k else 0.0),
+                                s - s_area - (WIREW * wl / HPWL_REF if k else 0.0)
+                                - g_term if False else 0.0, g_term]
                 return s
             return sc
 
@@ -1728,6 +1765,22 @@ def stage3_legalizer(n, positions, is_preplaced, constraints, util=None,
             H_cur[0] = max(H_cur[0], r[3])
             if STEP_HOOK is not None:
                 STEP_HOOK(c, r, list(mr.F), list(occ), W)
+            if TRACING and c >= 0 and GT_POS is not None and c < len(GT_POS):
+                gx, gy, gw, gh = (float(v) for v in GT_POS[c][:4])
+                _sc2 = mk_score(c)
+                _here = _sc2(P[c, 0], P[c, 1], P[c, 2], P[c, 3],
+                             P[c, 2] * P[c, 3], P[c, 2], P[c, 3])
+                _mine = list(_last)
+                _there = _sc2(gx, gy, P[c, 2], P[c, 3],
+                              P[c, 2] * P[c, 3], P[c, 2], P[c, 3])
+                _gt = list(_last)
+                TRACE.append(dict(blk=int(c), phase="interior",
+                                  x=float(P[c, 0]), y=float(P[c, 1]),
+                                  w=float(P[c, 2]), h=float(P[c, 3]),
+                                  gx=gx, gy=gy, gw=gw, gh=gh,
+                                  score_here=float(_here), score_gt=float(_there),
+                                  area_here=_mine[0], wire_here=_mine[1], grp_here=_mine[3],
+                                  area_gt=_gt[0], wire_gt=_gt[1], grp_gt=_gt[3]))
             if c >= 0:
                 placed_at[c] = ((r[0] + r[1]) / 2, (r[2] + r[3]) / 2)
             else:
