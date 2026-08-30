@@ -342,12 +342,34 @@ class MyOptimizer(FloorplanOptimizer):
         # cost a single array copy and cannot grow.  They are what let the
         # stages be compared against ground truth without re-running anything.
         globals()["LAST_STAGE1"] = positions[:block_count].copy()
+        # STAGE 2'S SCHEDULE IS SPLIT BY PROBLEM SIZE.
+        # Small cases settle better out of a shorter, stronger run: with more
+        # force per round the blocks reach their cluster peers before the anneal
+        # caps the step, and 150 rounds is already convergence at that scale.
+        # Large cases go the other way -- the extra force overshoots, stage 3 has
+        # to undo it, and the frame ends up worse.  Per size bucket over the
+        # validation suite: <=70 blocks improves 38/50 cases, >=96 regresses.
+        # Confirmed on 40 fresh synthetic suites, where the gain is real but
+        # much smaller than the validation set advertised (AvgCost -0.0019,
+        # 26/40 suites, Total unchanged) -- the threshold was picked on that
+        # suite, so most of the local -0.0110 was self-flattery.
+        _small = block_count <= 70
+        _rounds = 150 if _small else 450
+        _gain = 3.0 if _small else 1.0
+
         stage2_electrostatic(block_count, positions, is_preplaced_arr,
                          area_targets=area_targets.cpu().numpy(), constraints=cons_np,
                          b2b_edges=b2b_connectivity.cpu().numpy(),
                          cap_start=float(_os.environ.get("LD_CAP_START", "6.0")),
                          cap_end=float(_os.environ.get("LD_CAP_END", "1.0")),
-                         anneal_frac=float(_os.environ.get("LD_ANNEAL", "0.6")),
+                         # ANNEAL FRACTION IS 0.2, NOT 0.6.
+                         # cap_t ramps from cap_start to cap_end over the first
+                         # anneal_frac of the run, so a low value spends most of
+                         # the schedule at the tight cap instead of ramping into
+                         # it.  Swept over the full suite and over 12 synthetic
+                         # suites: 0.2 wins 11/12.  Hardcoded, not an env knob --
+                         # the grader runs with a bare environment.
+                         anneal_frac=0.2,
                          # 900 -> 450: profiling showed this stage as the
                          # single biggest cost in solve() (case 99: 1.26s of
                          # 3.47s), and 900 rounds is more than stage3 needs
@@ -356,15 +378,15 @@ class MyOptimizer(FloorplanOptimizer):
                          # suite, runtime-adjusted: 450 is the sweet spot --
                          # lower saves more runtime but quality creeps back
                          # up on the heavily-weighted large cases.
-                         rounds=int(_os.environ.get("LD_ROUNDS", "450")),
+                         rounds=_rounds,
                          lr=float(_os.environ.get("LD_LR", "1.0")),
-                         w_battr=float(_os.environ.get("LD_BATTR", "3.0")),
-                         w_cattr=float(_os.environ.get("LD_CATTR", "2.0")),
-                         w_conn=float(_os.environ.get("LD_CONN", "1.0")),
+                         w_battr=3.0 * _gain,
+                         w_cattr=2.0 * _gain,
+                         w_conn=1.0 * _gain,
                          w_grav=float(_os.environ.get("LD_GRAV", "0.0")),
                          p2b_edges=p2b_connectivity.cpu().numpy(),
                          pins_pos=pins_pos.cpu().numpy(),
-                         w_pin=float(_os.environ.get("LD_PIN", "1.5")),
+                         w_pin=1.5 * _gain,
                          mass_exp=float(_os.environ.get("LD_MASS", "0.0")))
         # =================================================================
         # STAGES 3-5, SWEPT OVER FRAME WIDTHS
