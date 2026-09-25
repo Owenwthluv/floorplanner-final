@@ -38,23 +38,6 @@ The runtime discount is already fully collected: 97 of 100 cases sit exactly on 
 
 ---
 
-## What each stage is worth
-
-Quality only, same 100 cases, one stage removed at a time.
-
-| Configuration | Total `e^(n/12)` | hpwl_gap | area_gap | V_rel |
-|---|---|---|---|---|
-| **Full pipeline** | **1.1459** | 0.162 | 0.060 | 0.025 |
-| Stage 4 without its wirelength term | 1.1554 | 0.182 | 0.060 | 0.025 |
-| Stage 5 without closing by growth | 1.1659 | 0.162 | 0.060 | 0.029 |
-| No stage 4 | 1.2620 | 0.229 | 0.199 | 0.031 |
-| Neither stage 4 nor stage 5 | 1.3080 | 0.227 | 0.199 | 0.056 |
-| No stage 5 | 1.6705 | 0.162 | 0.061 | 0.189 |
-
-Stage 4 without stage 5 is worse than having neither: the solver meets its equalities to a tolerance, which opens cluster contacts that only the closure pass can repair. The two are one unit.
-
----
-
 ## Pipeline
 
 ```
